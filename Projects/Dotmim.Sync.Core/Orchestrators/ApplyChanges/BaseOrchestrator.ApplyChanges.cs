@@ -49,8 +49,8 @@ namespace Dotmim.Sync
                         $@"[InternalApplyChangesAsync]. directory {{DirectoryName}} BatchPartsInfo count: {{BatchPartsInfoCount}} RowsCount {{RowsCount}}",
                         message.Changes.DirectoryName, message.Changes.BatchPartsInfo.Count, message.Changes.RowsCount);
 
-                    var schemaTables = message.Schema.Tables.SortByDependencies(tab => tab.GetRelations().Select(r => r.GetParentTable())).ToList();
-                    var reverseSchemaTables = message.Schema.Tables.SortByDependencies(tab => tab.GetRelations().Select(r => r.GetParentTable())).Reverse().ToList();
+                    var schemaTables = message.Schema.Tables.SortByDependencies(tab => tab.GetRelations().Select(r => r.GetParentTable())).ToArray();
+                    var reverseSchemaTables = schemaTables.Reverse().ToArray();
 
                     // create local directory
                     if (!string.IsNullOrEmpty(message.BatchDirectory) && !Directory.Exists(message.BatchDirectory))
@@ -130,12 +130,12 @@ namespace Dotmim.Sync
                     // clear the changes because we don't need them anymore
                     if (cleanFolder)
                     {
-                        this.Logger.LogInformation($@"[InternalApplyChangesAsync]. Cleaning directory {{DirectoryName}}.", message.Changes.DirectoryName);
+                        this.Logger.LogInformation("[InternalApplyChangesAsync]. Cleaning directory {DirectoryName}.", message.Changes.DirectoryName);
                         message.Changes.TryRemoveDirectory();
                     }
                 }
 
-                this.Logger.LogInformation($@"[InternalApplyChangesAsync]. return exception {{FailureException}} ", failureException != null ? failureException.Message : "No Exception");
+                this.Logger.LogInformation(failureException, "[InternalApplyChangesAsync]");
 
                 return failureException;
             }
@@ -186,7 +186,7 @@ namespace Dotmim.Sync
             var dbCommandType = applyType == SyncRowState.Deleted ? DbCommandType.DeleteRows : (init ? DbCommandType.InsertRows : DbCommandType.UpdateRows);
             var dbPreCommandType = applyType == SyncRowState.Deleted ? DbCommandType.PreDeleteRows : (init ? DbCommandType.PreInsertRows : DbCommandType.PreUpdateRows);
 
-            this.Logger.LogInformation($@"[InternalApplyTableChangesAsync]. table {{TableName}}. init {{Init}} command type {{DbCommandType}}", schemaTable.GetFullName(), init, dbCommandType);
+            this.Logger.LogInformation("[InternalApplyTableChangesAsync]. table {TableName}. init {Init} command type {DbCommandType}", schemaTable.GetFullName(), init, dbCommandType);
 
             // tmp sync table with only writable columns
             var changesSet = schemaTable.Schema.Clone(false);
@@ -217,14 +217,11 @@ namespace Dotmim.Sync
             // Applied row for this particular BPI
             var appliedRows = 0;
 
-            IEnumerable<BatchPartInfo> bpiTables;
-
             // Get command
             DbCommand command = null;
             var isBatch = false;
-            string cmdText;
 
-            bpiTables = message.Changes.GetBatchPartsInfos(schemaTable);
+            var bpiTables = message.Changes.GetBatchPartsInfos(schemaTable);
 
             // launch interceptor if any
             var args = new TableChangesApplyingArgs(context, message.Changes, bpiTables, schemaTable, applyType, command, connection, transaction);
@@ -243,7 +240,7 @@ namespace Dotmim.Sync
                 // We don't report progress if we do not have isApplied any changes on the table, to limit verbosity of Progress
                 await this.InterceptAsync(batchChangesApplyingArgs, progress, cancellationToken).ConfigureAwait(false);
 
-                this.Logger.LogInformation($@"[InternalApplyTableChangesAsync]. Directory name {{DirectoryName}}. BatchParts count {{BatchPartsInfoCount}}", message.Changes.DirectoryName, message.Changes.BatchPartsInfo.Count);
+                this.Logger.LogInformation("[InternalApplyTableChangesAsync]. Directory name {DirectoryName}. BatchParts count {BatchPartsInfoCount}", message.Changes.DirectoryName, message.Changes.BatchPartsInfo.Count);
 
                 // If we have a transient error happening, and we are rerunning the tranaction,
                 // raising an interceptor
@@ -251,9 +248,9 @@ namespace Dotmim.Sync
                     this.InterceptAsync(new TransientErrorOccuredArgs(context, connection, ex, cpt, ts), progress, cancellationToken).AsTask());
 
                 // Defining my retry policy
-                SyncPolicy retryPolicy = this.Options.TransactionMode != TransactionMode.AllOrNothing
-                 ? retryPolicy = SyncPolicy.WaitAndRetryForever(retryAttempt => TimeSpan.FromMilliseconds(500 * retryAttempt), (ex, arg) => this.Provider.ShouldRetryOn(ex), onRetry)
-                 : retryPolicy = SyncPolicy.WaitAndRetry(0, TimeSpan.Zero);
+                var retryPolicy = this.Options.TransactionMode != TransactionMode.AllOrNothing
+                    ? SyncPolicy.WaitAndRetryForever(retryAttempt => TimeSpan.FromMilliseconds(500 * retryAttempt), (ex, arg) => this.Provider.ShouldRetryOn(ex), onRetry)
+                    : SyncPolicy.WaitAndRetry(0, TimeSpan.Zero);
 
                 var applyChangesPolicyResult = await retryPolicy.ExecuteAsync(
                     async () =>
@@ -287,9 +284,15 @@ namespace Dotmim.Sync
 
                         if (preCommand != null)
                         {
-                            await this.InterceptAsync(new ExecuteCommandArgs(context, preCommand, dbPreCommandType, runner.Connection, runner.Transaction), runner.Progress, runner.CancellationToken).ConfigureAwait(false);
-                            await preCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
-                            preCommand.Dispose();
+                            try
+                            {
+                                await this.InterceptAsync(new ExecuteCommandArgs(context, preCommand, dbPreCommandType, runner.Connection, runner.Transaction), runner.Progress, runner.CancellationToken).ConfigureAwait(false);
+                                await preCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+                            }
+                            finally
+                            {
+                                preCommand.Dispose();
+                            }
                         }
 
                         (command, isBatch) = await this.InternalGetCommandAsync(scopeInfo, context, syncAdapter, dbCommandType,
@@ -313,11 +316,11 @@ namespace Dotmim.Sync
                                 // Adding rows to the batch rows
                                 if (batchRows.Count < this.Provider.BulkBatchMaxLinesCount)
                                 {
-                                    if (applyType == SyncRowState.Modified && (syncRow.RowState == SyncRowState.RetryModifiedOnNextSync || syncRow.RowState == SyncRowState.Modified))
+                                    if (applyType == SyncRowState.Modified && syncRow.RowState is SyncRowState.RetryModifiedOnNextSync or SyncRowState.Modified)
                                         batchRows.Add(syncRow);
-                                    else if (applyType == SyncRowState.Deleted && (syncRow.RowState == SyncRowState.RetryDeletedOnNextSync || syncRow.RowState == SyncRowState.Deleted))
+                                    else if (applyType == SyncRowState.Deleted && syncRow.RowState is SyncRowState.RetryDeletedOnNextSync or SyncRowState.Deleted)
                                         batchRows.Add(syncRow);
-                                    else if (syncRow.RowState == SyncRowState.ApplyModifiedFailed || syncRow.RowState == SyncRowState.ApplyDeletedFailed)
+                                    else if (syncRow.RowState is SyncRowState.ApplyModifiedFailed or SyncRowState.ApplyDeletedFailed)
                                         errorsRows.Add((syncRow, new Exception("Row failed to be applied on last sync")));
 
                                     if (rowsFetched < batchPartInfo.RowsCount && batchRows.Count < this.Provider.BulkBatchMaxLinesCount)
@@ -339,10 +342,9 @@ namespace Dotmim.Sync
                                     appliedRows += rowAppliedCount;
 
                                     // Check conflicts
-                                    if (conflictSyncRows != null && conflictSyncRows.Count > 0)
+                                    if (conflictSyncRows != null)
                                     {
-                                        foreach (var conflictRow in conflictSyncRows)
-                                            conflictRows.Add(conflictRow);
+                                        conflictRows.AddRange(conflictSyncRows);
                                     }
                                 }
                                 else
@@ -356,7 +358,7 @@ namespace Dotmim.Sync
                                     // we have an error in the entire batch
                                     // try to fallback to row per row
                                     // and see if we can still continue to insert rows (excepted the error one) and manage the error
-                                    this.Logger.LogInformation($"[InternalApplyTableChangesAsync]. Using per line apply since we had an error on batch mode : {{ErrorException}}", errorException.Message);
+                                    this.Logger.LogInformation(errorException, "[InternalApplyTableChangesAsync]. Using per line apply since we had an error on batch mode.");
 
                                     // fallback to row per row
                                     var fallbackArgs = new RowsChangesFallbackFromBatchToSingleRowApplyingArgs(context, errorException, message.Changes, batchRows, schemaChangesTable, applyType, command,
@@ -368,20 +370,20 @@ namespace Dotmim.Sync
                                     (command, isBatch) = await this.InternalGetCommandAsync(scopeInfo, context, syncAdapter, dbCommandType,
                                                     runner.Connection, runner.Transaction, runner.Progress, runner.CancellationToken).ConfigureAwait(false);
 
-                                    cmdText = command.CommandText;
+                                    var cmdText = command.CommandText;
 
                                     foreach (var batchRow in batchRows)
                                     {
-                                        if (batchRow.RowState == SyncRowState.ApplyModifiedFailed || batchRow.RowState == SyncRowState.ApplyDeletedFailed)
+                                        if (batchRow.RowState is SyncRowState.ApplyModifiedFailed or SyncRowState.ApplyDeletedFailed)
                                         {
                                             errorsRows.Add((batchRow, new Exception("Row failed to be applied on last sync")));
                                             continue;
                                         }
 
-                                        if (applyType == SyncRowState.Modified && batchRow.RowState != SyncRowState.RetryModifiedOnNextSync && batchRow.RowState != SyncRowState.Modified)
+                                        if (applyType == SyncRowState.Modified && batchRow.RowState is not (SyncRowState.RetryModifiedOnNextSync or SyncRowState.Modified))
                                             continue;
 
-                                        if (applyType == SyncRowState.Deleted && batchRow.RowState != SyncRowState.RetryDeletedOnNextSync && batchRow.RowState != SyncRowState.Deleted)
+                                        if (applyType == SyncRowState.Deleted && batchRow.RowState is not (SyncRowState.RetryDeletedOnNextSync or SyncRowState.Deleted))
                                             continue;
 
 #pragma warning disable CA2100 // Review SQL queries for security vulnerabilities
@@ -417,16 +419,16 @@ namespace Dotmim.Sync
 
                             foreach (var syncRow in localSerializer.GetRowsFromFile(fullPath, schemaChangesTable))
                             {
-                                if (syncRow.RowState == SyncRowState.ApplyModifiedFailed || syncRow.RowState == SyncRowState.ApplyDeletedFailed)
+                                if (syncRow.RowState is SyncRowState.ApplyModifiedFailed or SyncRowState.ApplyDeletedFailed)
                                 {
                                     errorsRows.Add((syncRow, new Exception("Row failed to be applied on last sync")));
                                     continue;
                                 }
 
-                                if (applyType == SyncRowState.Modified && syncRow.RowState != SyncRowState.RetryModifiedOnNextSync && syncRow.RowState != SyncRowState.Modified)
+                                if (applyType == SyncRowState.Modified && syncRow.RowState is not (SyncRowState.RetryModifiedOnNextSync or SyncRowState.Modified))
                                     continue;
 
-                                if (applyType == SyncRowState.Deleted && syncRow.RowState != SyncRowState.RetryDeletedOnNextSync && syncRow.RowState != SyncRowState.Deleted)
+                                if (applyType == SyncRowState.Deleted && syncRow.RowState is not (SyncRowState.RetryDeletedOnNextSync or SyncRowState.Deleted))
                                     continue;
 
                                 var (rowAppliedCount, errorException) = await this.InternalApplySingleRowAsync(context, command, syncRow, schemaChangesTable, syncAdapter, applyType, message, dbCommandType,
@@ -454,18 +456,14 @@ namespace Dotmim.Sync
                     catch (Exception ex)
                     {
                         if (runner != null)
-                        {
                             await runner.RollbackAsync($"InternalApplyTableChangesAsync during apply changes. Error:{ex.Message}").ConfigureAwait(false);
-                            await runner.DisposeAsync().ConfigureAwait(false);
-                        }
 
                         throw this.GetSyncError(context, ex);
                     }
                     finally
                     {
-                        // Close file
-                        if (localSerializer.IsOpen)
-                            await localSerializer.CloseFileAsync().ConfigureAwait(false);
+                        if (runner != null)
+                            await runner.DisposeAsync().ConfigureAwait(false);
                     }
                 }, cancellationToken).ConfigureAwait(false);
 
@@ -477,10 +475,11 @@ namespace Dotmim.Sync
                 appliedRows += applyChangesPolicyResult.appliedRows;
                 failedRows += applyChangesPolicyResult.failedRows;
 
-                if (applyChangesPolicyResult.conflictRows != null && applyChangesPolicyResult.conflictRows.Count > 0)
-                    applyChangesPolicyResult.conflictRows.ForEach(sr => conflictRows.Add(sr));
-                if (applyChangesPolicyResult.errorsRows != null && applyChangesPolicyResult.errorsRows.Count > 0)
-                    applyChangesPolicyResult.errorsRows.ForEach(sr => errorsRows.Add(sr));
+                if (applyChangesPolicyResult.conflictRows?.Count > 0)
+                    conflictRows.AddRange(applyChangesPolicyResult.conflictRows);
+
+                if (applyChangesPolicyResult.errorsRows?.Count > 0)
+                    errorsRows.AddRange(applyChangesPolicyResult.errorsRows);
             }
 
             try
@@ -554,7 +553,7 @@ namespace Dotmim.Sync
                 command?.Dispose();
             }
 
-            this.Logger.LogInformation($@"[InternalApplyTableChangesAsync]. return exception {{FailureException}} ", failureException != null ? failureException.Message : "No Exception");
+            this.Logger.LogInformation(failureException, "[InternalApplyChangesAsync]");
 
             return failureException;
         }
@@ -683,7 +682,7 @@ namespace Dotmim.Sync
                     // If conflicts occured
                     foreach (var conflictRow in conflictRows)
                     {
-                        this.Logger.LogInformation($@"[InternalApplyTableChangesAsync]. Handle {{ConflictsCount}} conflitcts", conflictRows.Count);
+                        this.Logger.LogInformation("[InternalApplyTableChangesAsync]. Handle {ConflictsCount} conflicts", conflictRows.Count);
 
                         (var isApplied, var isConflictResolved, var exception) =
                             await this.HandleConflictAsync(scopeInfo, context, message.Changes, message.LocalScopeId, message.SenderScopeId, conflictRow, schemaChangesTable,
@@ -705,13 +704,13 @@ namespace Dotmim.Sync
                     var shouldRollbackTransaction = false;
                     foreach (var errorRow in errorsRows)
                     {
-                        this.Logger.LogInformation($@"[InternalApplyTableChangesAsync]. Handle {{ErrorsRowsCount}} errors", errorsRows.Count);
+                        this.Logger.LogInformation("[InternalApplyTableChangesAsync]. Handle {ErrorsRowsCount} errors", errorsRows.Count);
 
-                        if ((errorRow.SyncRow.RowState == SyncRowState.ApplyModifiedFailed || errorRow.SyncRow.RowState == SyncRowState.Modified || errorRow.SyncRow.RowState == SyncRowState.RetryModifiedOnNextSync)
+                        if (errorRow.SyncRow.RowState is SyncRowState.ApplyModifiedFailed or SyncRowState.Modified or SyncRowState.RetryModifiedOnNextSync
                             && applyType == SyncRowState.Deleted)
                             continue;
 
-                        if ((errorRow.SyncRow.RowState == SyncRowState.ApplyDeletedFailed || errorRow.SyncRow.RowState == SyncRowState.Deleted || errorRow.SyncRow.RowState == SyncRowState.RetryDeletedOnNextSync)
+                        if (errorRow.SyncRow.RowState is SyncRowState.ApplyDeletedFailed or SyncRowState.Deleted or SyncRowState.RetryDeletedOnNextSync
                             && applyType == SyncRowState.Modified)
                             continue;
 
@@ -784,7 +783,7 @@ namespace Dotmim.Sync
 
                 var schemaTables = message.Schema.Tables.SortByDependencies(tab => tab.GetRelations().Select(r => r.GetParentTable()));
 
-                this.Logger.LogInformation($@"[InternalApplyCleanErrorsAsync]. Directory name {{DirectoryName}}. BatchParts count {{BatchPartsInfoCount}}", lastSyncErrorsBatchInfo.DirectoryName, lastSyncErrorsBatchInfo.BatchPartsInfo.Count);
+                this.Logger.LogInformation("[InternalApplyCleanErrorsAsync]. Directory name {DirectoryName}. BatchParts count {BatchPartsInfoCount}", lastSyncErrorsBatchInfo.DirectoryName, lastSyncErrorsBatchInfo.BatchPartsInfo.Count);
 
                 foreach (var schemaTable in schemaTables)
                 {
@@ -866,7 +865,7 @@ namespace Dotmim.Sync
                     if (failedRows.Count <= 0 && File.Exists(lastSyncErrorsBpiFullPath))
                         File.Delete(lastSyncErrorsBpiFullPath);
 
-                    this.Logger.LogInformation($@"[InternalApplyCleanErrorsAsync]. schemaTable {{SchemaTableName}} failedRows count {{FailedRowsCount}}", schemaTable.GetFullName(), failedRows.Count);
+                    this.Logger.LogInformation("[InternalApplyCleanErrorsAsync]. schemaTable {SchemaTableName} failedRows count {FailedRowsCount}", schemaTable.GetFullName(), failedRows.Count);
                 }
             }
             catch (Exception ex)
@@ -877,13 +876,11 @@ namespace Dotmim.Sync
             {
                 if (localSerializerWriter != null)
                 {
-                    await localSerializerWriter.CloseFileAsync().ConfigureAwait(false);
                     await localSerializerWriter.DisposeAsync().ConfigureAwait(false);
                 }
 
                 if (localSerializerReader != null)
                 {
-                    await localSerializerReader.CloseFileAsync().ConfigureAwait(false);
                     await localSerializerReader.DisposeAsync().ConfigureAwait(false);
                 }
             }

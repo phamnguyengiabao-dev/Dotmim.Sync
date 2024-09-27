@@ -41,24 +41,21 @@ internal class Program
 
     private static async Task Main(string[] args)
     {
-        var serverProvider = new SqlSyncProvider(DBHelper.GetDatabaseConnectionString(ServerDbName));
+        // var serverProvider = new SqlSyncProvider(DBHelper.GetDatabaseConnectionString(ServerDbName));
+        var serverProvider = new SqlSyncChangeTrackingProvider(DBHelper.GetDatabaseConnectionString(ServerDbName));
 
-        // var serverProvider = new SqlSyncChangeTrackingProvider(DBHelper.GetDatabaseConnectionString(serverDbName));
         // var serverProvider = new NpgsqlSyncProvider(DBHelper.GetNpgsqlDatabaseConnectionString("data"));
         // var serverProvider = new MariaDBSyncProvider(DBHelper.GetMariadbDatabaseConnectionString(serverDbName));
         // var serverProvider = new MySqlSyncProvider(DBHelper.GetMySqlDatabaseConnectionString(serverDbName));
 
-        var clientProvider = new SqliteSyncProvider(Path.GetRandomFileName().Replace(".", "").ToLowerInvariant() + ".db");
-        //var clientProvider = new SqlSyncProvider(DBHelper.GetDatabaseConnectionString(ClientDbName));
-
-        // var clientProvider = new SqlSyncChangeTrackingProvider(DBHelper.GetDatabaseConnectionString(clientDbName));
+        // var clientProvider = new SqliteSyncProvider(Path.GetRandomFileName().Replace(".", "").ToLowerInvariant() + ".db");
+        // var clientProvider = new SqlSyncProvider(DBHelper.GetDatabaseConnectionString(ClientDbName));
+        var clientProvider = new SqlSyncChangeTrackingProvider(DBHelper.GetDatabaseConnectionString(ClientDbName));
         // var clientProvider = new NpgsqlSyncProvider(DBHelper.GetNpgsqlDatabaseConnectionString(clientDbName));
         // clientProvider.UseBulkOperations = false;
         // var clientProvider = new MariaDBSyncProvider(DBHelper.GetMariadbDatabaseConnectionString(clientDbName));
         // var clientProvider = new MySqlSyncProvider(DBHelper.GetMySqlDatabaseConnectionString(clientDbName));
-        var setup = new SyncSetup("Customer");
-
-        var options = new SyncOptions();
+        var setup = new SyncSetup(AllTables);
 
         // options.Logger = new SyncLogger().AddDebug().SetMinimumLevel(LogLevel.Information);
         // options.UseVerboseErrors = true;
@@ -71,7 +68,7 @@ internal class Program
         // var clientProvider = new SqlSyncProvider(DBHelper.GetDatabaseConnectionString("vaguegitclient"));
 
         // var setup = new SyncSetup(new string[] { "SubscriptionTransactions" });
-        // var options = new SyncOptions();
+        var options = new SyncOptions();
 
         // var loggerFactory = LoggerFactory.Create(builder => { builder.AddSeq().SetMinimumLevel(LogLevel.Debug); });
         // var logger = loggerFactory.CreateLogger("Dotmim.Sync");
@@ -343,6 +340,8 @@ internal class Program
 
     private static async Task SynchronizeAsync(CoreProvider clientProvider, CoreProvider serverProvider, SyncSetup setup, SyncOptions options, string scopeName = SyncOptions.DefaultScopeName)
     {
+        setup = new SyncSetup("Opr");
+
         options.DisableConstraintsOnApplyChanges = true;
 
         var progress = new SynchronousProgress<ProgressArgs>(s =>
