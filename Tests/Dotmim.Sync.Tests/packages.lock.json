@@ -1117,7 +1117,11 @@
       "dotmim.sync.sqlserver.changetracking": {
         "type": "Project",
         "dependencies": {
-          "Dotmim.Sync.SqlServer": "[1.1.0, )"
+          "Dotmim.Sync.Core": "[1.1.0, )",
+          "Dotmim.Sync.SqlServer": "[1.1.0, )",
+          "Dotmim.Sync.Sqlite": "[1.1.0, )",
+          "Dotmim.Sync.Web.Client": "[1.1.0, )",
+          "Dotmim.Sync.Web.Server": "[1.1.0, )"
         }
       },
       "dotmim.sync.web.client": {
@@ -1921,7 +1925,11 @@
       "dotmim.sync.sqlserver.changetracking": {
         "type": "Project",
         "dependencies": {
-          "Dotmim.Sync.SqlServer": "[1.1.0, )"
+          "Dotmim.Sync.Core": "[1.1.0, )",
+          "Dotmim.Sync.SqlServer": "[1.1.0, )",
+          "Dotmim.Sync.Sqlite": "[1.1.0, )",
+          "Dotmim.Sync.Web.Client": "[1.1.0, )",
+          "Dotmim.Sync.Web.Server": "[1.1.0, )"
         }
       },
       "dotmim.sync.web.client": {
@@ -2594,7 +2602,11 @@
       "dotmim.sync.sqlserver.changetracking": {
         "type": "Project",
         "dependencies": {
-          "Dotmim.Sync.SqlServer": "[1.1.0, )"
+          "Dotmim.Sync.Core": "[1.1.0, )",
+          "Dotmim.Sync.SqlServer": "[1.1.0, )",
+          "Dotmim.Sync.Sqlite": "[1.1.0, )",
+          "Dotmim.Sync.Web.Client": "[1.1.0, )",
+          "Dotmim.Sync.Web.Server": "[1.1.0, )"
         }
       },
       "dotmim.sync.web.client": {

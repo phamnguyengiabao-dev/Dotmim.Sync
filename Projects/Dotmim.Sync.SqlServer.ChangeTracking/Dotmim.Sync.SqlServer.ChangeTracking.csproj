@@ -44,6 +44,10 @@
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+		<ProjectReference Include="..\Dotmim.Sync.Core\Dotmim.Sync.Core.csproj" />
+		<ProjectReference Include="..\Dotmim.Sync.Sqlite\Dotmim.Sync.Sqlite.csproj" />
 		<ProjectReference Include="..\Dotmim.Sync.SqlServer\Dotmim.Sync.SqlServer.csproj" />
+		<ProjectReference Include="..\Dotmim.Sync.Web.Client\Dotmim.Sync.Web.Client.csproj" />
+		<ProjectReference Include="..\Dotmim.Sync.Web.Server\Dotmim.Sync.Web.Server.csproj" />
 	</ItemGroup>
 </Project>
